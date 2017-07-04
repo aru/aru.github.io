@@ -1,0 +1,324 @@
+Arreglos dinámicos en C
+
+Para hacer un arreglo dinámico en C se nos enseña a hacer:
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+int n = 0;
+scanf("%d",&n);
+int * arr = (int *)malloc(n * sizeof(*arr));
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Si luego queremos cambiar de tamaño este mismo arreglo, debemos hacer:
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+scanf("%d", &n);
+arr = realloc(arr, n * sizeof(*arr));
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Mi aprendizaje en el aula termino aquí. Después de eso, decidí enfocarme en C++, donde puedes hacer:
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+vector<int> arr;
+arr.push_back(0);
+arr.push_back(1);
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Siempre pensé que esto era más fácil. Pero ahora, en mi trabajo no puedo utilizar C++.
+
+¿Qué necesitamos para traer esta facilidad a C?
+
+Primero hay que hacer una rutina genérica, que funcione con cualquier tipo de objeto, algo así:
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+typedef struct
+{
+    int   allocated; /* La memoria que tenemos reservado para nuestro objeto */
+    int   in_use;    /* La memoria que estamos usando actualmente */
+    void *data;      /* Lo que queremos guardar */
+} gen_arr;
+
+void gen_arr_push(gen_arr* arr, void* data, int data_size)
+{
+    if(arr->in_use + data_size > arr->allocated)
+    {
+        int memory_to_allocate = arr->allocated + data_size;
+
+        arr->data = realloc(arr->data, memory_to_allocate * 2);
+        arr->allocated = memory_to_allocate * 2;
+    }
+
+    memmove(((char*)arr->data + arr->in_use), data, data_size);
+    arr->in_use += data_size;
+}
+
+/* Ahora podemos hacer */
+gen_arr arr = {0};
+for(int i = 0; i < NUM; i++)
+{
+    gen_arr_push(&stack, &i, sizeof(i));
+}
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Esta no es la mejor forma de hacerlo, pero les da una idea de lo que necesitamos:
+* Guardar la memoria que tenemos reservada para nuestro objeto.
+* Guardar la memoria que estamos usando actualmente.
+
+¿Por qué no es la mejor forma de hacerlo?
+
+El compilador ya no sabe cuanto miden los datos de nuestro arreglo.
+Ya no podemos hacer:
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+arr[0] = 10;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Ahora tenemos que hacer:
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+((int *) (arr.data))[0] = 10;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Para que el compilador entienda lo que queremos hacer, _movernos a lo largo de nuestro arreglo de enteros_, 
+tenemos que decirle la clase de datos con la que estamos lidiando.
+
+Idealmente a uno le gustaría ver algo así:
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+arr[0] = 10;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+¿Pero cómo llegamos a esto?
+
+La respuesta para algunos es _trivial_. Pero para mi no lo era.
+
+Podemos guardar esta parte de nuestra estructura:
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+typedef struct 
+{ 
+    int allocated; 
+    int in_use; 
+} arr;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Detrás de un apuntador común y corriente a cualquier tipo de dato.
+Solo tenemos que reservar suficiente espacio para _2 enteros_ y para nuestros datos.
+Al usuario solo le regresamos la parte donde viven los datos:
+
+.-----+------------.
+| arr | TYPE* data |
+'-----+------------'
+      ^
+      |
+      |
+
+Esto es lo que regresamos al usuario.
+
+Del siguiente modo:
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+pointer = (int *)realloc(pointer, (sizeof(int) * 2) + (data_size * min_space_needed) );
+
+if(pointer)
+{
+    if(arr == 0)
+    {
+        pointer[1] = 0;
+    }
+    pointer[0] = min_spc_needed;
+    return (pointer + 2);
+}
+
+/* Así ya podemos hacer lo siguiente */
+
+#define arr__hdr(arr) ((int *) (arr) - 2)
+#define arr__all(arr) arr__hdr(arr)[0]
+#define arr__use(arr) arr__hdr(arr)[1]
+#define arr_count(a) ((a) ? arr__use(a) : 0)
+
+int * arr = 0;
+push(arr, 1);
+push(arr, 2);
+
+for(int i = 0; i < arr__count(arr); i++)
+    printf("%d\n", arr[i]);
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+La implementación completa es por supuesto más complicada que esto.
+Pero el conocimiento de la técnica es lo que más quería transmitir.
+
+C lo puede todo :), sólo tenemos que comprender:
+1. cómo funciona el compilador
+2. qué queremos hacer con la memoria
+
+Mi código completo es el siguiente:
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#include <stdlib.h>
+
+#define sb_free  aru_sb_free
+#define sb_push  aru_sb_push
+#define sb_count aru_sb_count
+#define sb_add   aru_sb_add
+#define sb_last  aru_sb_last
+
+/*
+  our hidden structure looks like this:
+  struct header
+  {
+      int allocated;
+      int in_use;
+  };
+*/
+
+#define aru__hdr(arr) ((int *) (arr) - 2)
+#define aru__all(arr) aru__hdr(arr)[0]
+#define aru__use(arr) aru__hdr(arr)[1]
+
+static void * aru__sbgrowf(void *arr, int increment, int itemsize)
+{
+
+    int dbl_cur_spc = 0;
+    if(arr)
+    {
+        /* We store the in_use_length of  the array in the first int of our
+           hidden structure. */
+        dbl_cur_spc = 2 * aru__all(arr);
+    }
+
+    int min_spc_needed = 0;
+    /* The amount of elements currently in the array is stored in the
+       second int of our hidden structure. */
+    min_spc_needed = aru_sb_count(arr) + increment;
+
+    if(dbl_cur_spc > min_spc_needed)
+    {
+        min_spc_needed = dbl_cur_spc;
+    }
+
+    int *pointer = 0;
+    if(arr)
+    {
+        pointer = aru__hdr(arr);
+    }
+
+    pointer = (int *)realloc(pointer, (itemsize * min_spc_needed) + (sizeof(int) * 2));
+
+    if(pointer)
+    {
+        if(arr == 0)
+        {
+            pointer[1] = 0;
+        }
+        pointer[0] = min_spc_needed;
+        return (pointer + 2);
+    }
+    else
+    {
+        /*
+          If we reached here we must be out of memory,
+          TODO: throw an error any way you want to.
+         */
+        return (void *) (2 * sizeof(int));
+    }
+
+}
+/*
+  If the amount of elements
+ */
+int aru__needgrow(void **arr, int n)
+{
+    return (*arr == 0 || (aru__use(*arr) + n) >= aru__all(*arr));
+}
+
+int aru__sbgrow(void **arr, int n, int itemsize)
+{
+    *arr = aru__sbgrowf(*arr, n, itemsize);
+    return 1;
+}
+
+int aru__sbmaybegrow(void* arr, int n, int itemsize)
+{
+    if(aru__needgrow(arr, n))
+    {
+        return(aru__sbgrow(arr, n, itemsize));
+    }
+    return 0;
+}
+
+int aru_sb_free(void * arr)
+{
+    if(arr)
+    {
+        int* header = (((int*)arr) - 2);
+        free(header);
+    }
+    return(0);
+}
+
+void dummy(void* arr, int n)
+{
+    printf("going through %s\n", __func__);
+    return;
+}
+void dummy2(void* arr, int n)
+{
+    printf("going through %s\n", __func__);
+    return;
+}
+
+#define macro_test(arr,val) (dummy(arr,val), dummy2(arr,val))
+#define aru_sb_push(arr,val) (aru__sbmaybegrow(&arr,1, sizeof(*arr)), (arr)[aru__use(arr)++] = (val))
+
+int aru_sb_count(void *arr)
+{
+    if(arr)
+    {
+        int* header = (((int*)arr) - 2);
+        return header[1];
+    }
+    return 0;
+}
+
+typedef struct test_t
+{
+    int id;
+    char *name;
+} test_t;
+
+int main()
+{
+    int *int_array = 0;
+    int temp = 1;
+    macro_test(int_array, temp);
+    aru_sb_push(int_array, temp);
+    temp = 2;
+    aru_sb_push(int_array, temp);
+    for(int i = 0; i < sb_count(int_array); i++)
+    {
+        printf("%d\n", int_array[i]);
+    }
+
+    test_t temp_str = {0};
+    test_t *str_array = 0;
+
+    temp_str.id = 0;
+    temp_str.name = "test0";
+    sb_push(str_array, temp_str);
+    temp_str.id = 1;
+    temp_str.name = "test1";
+    sb_push(str_array, temp_str);
+
+    for(int i = 0; i < sb_count(str_array); i++)
+    {
+        printf("id: %d\nname: %s\n", str_array[i].id, str_array[i].name);
+    }
+}
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+<!-- Markdeep: --><style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style><script src="markdeep.min.js"></script><script src="https://casual-effects.com/markdeep/latest/markdeep.min.js"></script><script>window.alreadyProcessedMarkdeep||(document.body.style.visibility="visible")</script>
