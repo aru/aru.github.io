@@ -1,9 +1,83 @@
-<head>UnAjolote Esports Team</head>
+I installed rustup in my NAS via the following command:
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+now I will try to install the anki server.
+I had to source the $HOME/.cargo/env file like so;
+```
+source ~/.cargo/env
+```
+and then I was able to just do this:
+```
+cargo install --git https://github.com/ankitects/anki.git --tag 24.06.3 anki-sync-server
+```
+This did not work because it failed to compile libc, what I did was install entware via app central in the asustor settings, after that I could do:
+```
+opkg update
+opkg install gcc
+```
+and after that, hopefully I will be able to do the cargo install command, we shall see. OK, I got another error? warning? message at the end:
+```
+There are no *-dev packages in Entware(with few exceptions)!
+Please install headers as described in the wiki:
+https://github.com/Entware/Entware/wiki
+```
+I also had to install protobuf:
+```
+opkg install protobuf
+```
+and then I had to set the PROTOC environment variable:
+```
+export PROTOC=/volume1/anki/protoc/bin/protoc
+```
+and then finally I was able to do this:
+```
+CARGO_TARGET_DIR=/tmp/cargo-installw0U97l cargo install --git https://github.com/ankitects/anki.git --tag 24.06.3 anki-sync-server
+```
+actually, no, I ran out of space in `/tmp` so I had to move that to
+```
+/volume1/anki/cargo-install
+```
+and then I was able to do: 
+```
+CARGO_TARGET_DIR=/volume1/anki/cargo-install cargo install --git https://github.com/ankitects/anki.git --tag 24.06.3 anki-sync-server
+```
+which is not as straightforward as it seems.
+Now that everything is installed we can do:
+```
+SYNC_USER1=aru:aru anki-sync-server
+```
+In the future you can create a script in `/etc/init.d/anki-server-sync` and create a script like this:
+```
+#!/bin/sh
 
-<p>A group of people dedicated to:</p>
+export SYNC_USER1=user:pass
+DAEMON=/usr/local/bin/anki-sync-server
+LOGFILE=/var/log/anki-sync-server.log
 
-<p>Social Justice, Digital Activism, Personal Development, Science, Technology, Art.</p>
+case "$1" in
+    start)
+        echo "Starting Anki Sync Server"
+        $DAEMON > $LOGFILE 2>&1 &
+        ;;
+    stop)
+        echo "Stopping Anki Sync Server"
+        pkill -f $DAEMON
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
 
-<p>Our current goal: Get enough funding to go pro.</p>
+exit 0
+```
+Next week we should try to do this one:
+[obsidian-livesync/docs/quick_setup.md at main · vrtmrz/obsidian-livesync (github.com)](https://github.com/vrtmrz/obsidian-livesync/blob/main/docs/quick_setup.md)
 
-<p>Business Inquires: aru at unajolote.com</p>
+OK I rebooted the NAS and it cleared the script from `/etc/init.d`, you should install it in `/usr/local/etc/init.d/` instead as per the internet: 
+[[HOW TO] Run your own script on system startup - ASUSTOR Community Forum](https://forum.asustor.com/viewtopic.php?t=1681)
